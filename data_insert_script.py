@@ -376,19 +376,14 @@ def import_records_to_maserdata():
     failed_imports = 0
     
     for batch_num in range(0, len(records), batch_size):
+        batch_start_time = datetime.now()
         batch_records = records[batch_num:batch_num + batch_size]
         batch_num_display = (batch_num // batch_size) + 1
         
-        print(f"\nProcessing batch {batch_num_display}: {len(batch_records)} records...")
-        
-        # Skip first 600 records only in the first batch
-        start_idx = 600 if batch_num_display == 1 else 0
+        current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        print(f"\n[{current_time}] Processing batch {batch_num_display}: {len(batch_records)} records...")
         
         for idx, record in enumerate(batch_records):
-            # Skip first 600 records in first batch
-            if batch_num_display == 1 and idx < 600:
-                continue
-            
             try:
                 # Import record to masterdata
                 result = VtexConnector.CONNECTOR.value.createDocument(
@@ -399,24 +394,35 @@ def import_records_to_maserdata():
                 
                 if result.get('httpStatus') == 200:
                     total_imported += 1
-                    # if (idx + 1) % 100 == 0:
-                    #     print(f"  ✓ Imported {idx + 1}/{len(batch_records)} records in this batch")
+                    if (idx + 1) % 100 == 0:
+                        current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                        print(f"  [{current_time}] ✓ Imported {idx + 1}/{len(batch_records)} records in this batch")
                 else:
                     failed_imports += 1
-                    print(f"  ✗ Failed to import record {idx + 1}: {result.get('message', 'Unknown error')}")
+                    current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                    print(f"  [{current_time}] ✗ Failed to import record {idx + 1}: {result.get('message', 'Unknown error')}")
             except Exception as e:
                 failed_imports += 1
-                print(f"  ✗ Error importing record {idx + 1}: {str(e)}")
+                current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                print(f"  [{current_time}] ✗ Error importing record {idx + 1}: {str(e)}")
         
-        print(f"Batch {batch_num_display} completed: {len(batch_records)} records imported")
+        # Calculate batch execution time
+        batch_end_time = datetime.now()
+        batch_duration_seconds = (batch_end_time - batch_start_time).total_seconds()
+        batch_duration_minutes = batch_duration_seconds / 60
+        current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        
+        print(f"[{current_time}] Batch {batch_num_display} completed: {len(batch_records)} records imported (Time taken: {batch_duration_minutes:.2f} minutes)")
         
         # Add delay between batches (except after the last batch)
         if batch_num + batch_size < len(records):
-            print(f"Waiting {batch_delay}s before next batch...")
+            current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            print(f"[{current_time}] Waiting {batch_delay}s before next batch...")
             time.sleep(batch_delay)
     
     # Print summary
-    print(f"\n{'='*50}")
+    current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    print(f"\n[{current_time}] {'='*50}")
     print(f"Import Summary:")
     print(f"  Total records imported: {total_imported:,}")
     print(f"  Failed imports: {failed_imports:,}")
