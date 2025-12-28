@@ -371,7 +371,7 @@ def import_records_to_maserdata():
     
     # Import records in batches of 1000
     batch_size = 1000
-    batch_delay = 2  # seconds
+    batch_delay = 10  # seconds
     total_imported = 0
     failed_imports = 0
     
