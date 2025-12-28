@@ -381,7 +381,14 @@ def import_records_to_maserdata():
         
         print(f"\nProcessing batch {batch_num_display}: {len(batch_records)} records...")
         
+        # Skip first 600 records only in the first batch
+        start_idx = 600 if batch_num_display == 1 else 0
+        
         for idx, record in enumerate(batch_records):
+            # Skip first 600 records in first batch
+            if batch_num_display == 1 and idx < 600:
+                continue
+            
             try:
                 # Import record to masterdata
                 result = VtexConnector.CONNECTOR.value.createDocument(
