@@ -7,6 +7,7 @@ import string
 from datetime import datetime, timedelta
 import os
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 class VtexHttpClient:
   def __init__(self, appKey, appToken):
@@ -348,16 +349,67 @@ def create_sample_records_and_save_locally():
     print(f"Total files created: {file_counter}")
     print(f"Output directory: {os.path.abspath(output_dir)}")
     
+def import_batch_parallel(batch_data):
+    """
+    Import a single batch of records in parallel.
+    Returns tuple of (batch_num, total_imported, failed_imports, duration_minutes)
+    """
+    batch_num = batch_data['batch_num']
+    batch_records = batch_data['records']
+    batch_num_display = batch_data['batch_num_display']
+    entityNam = "kohlerOrders"
+    schema = "kohler-orders-schema-v1"
+    
+    batch_start_time = datetime.now()
+    total_imported = 0
+    failed_imports = 0
+    
+    current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    print(f"\n[{current_time}] Processing batch {batch_num_display}: {len(batch_records)} records...")
+    
+    for idx, record in enumerate(batch_records):
+        try:
+            # Import record to masterdata
+            result = VtexConnector.CONNECTOR.value.createDocument(
+                entityNam, 
+                schema, 
+                record
+            )
+            
+            if result.get('httpStatus') == 200:
+                total_imported += 1
+                if (idx + 1) % 100 == 0:
+                    current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                    print(f"  [{current_time}] Batch {batch_num_display}: ✓ Imported {idx + 1}/{len(batch_records)} records")
+            else:
+                failed_imports += 1
+                current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                print(f"  [{current_time}] Batch {batch_num_display}: ✗ Failed to import record {idx + 1}: {result.get('message', 'Unknown error')}")
+        except Exception as e:
+            failed_imports += 1
+            current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            print(f"  [{current_time}] Batch {batch_num_display}: ✗ Error importing record {idx + 1}: {str(e)}")
+    
+    # Calculate batch execution time
+    batch_end_time = datetime.now()
+    batch_duration_seconds = (batch_end_time - batch_start_time).total_seconds()
+    batch_duration_minutes = batch_duration_seconds / 60
+    current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    
+    print(f"[{current_time}] Batch {batch_num_display} completed: {len(batch_records)} records imported ({total_imported} success, {failed_imports} failed) | Time taken: {batch_duration_minutes:.2f} minutes")
+    
+    return (batch_num_display, total_imported, failed_imports, batch_duration_minutes)
+
 def import_records_to_maserdata():
     """
     Import records from sample_records_00001.json to masterdata.
-    Processes records in batches of 1000 with 2s delay between batches.
+    Processes records in parallel batches of 1000 using ThreadPoolExecutor.
     """
     entityNam = "kohlerOrders"
     schema = "kohler-orders-schema-v1"
     
     # Read the sample records file
-    sample_file = "sample_data/sample_records_001.json"
+    sample_file = "sample_data/sample_records_002.json"
     
     if not os.path.exists(sample_file):
         print(f"Error: File {sample_file} not found!")
@@ -369,56 +421,62 @@ def import_records_to_maserdata():
     
     print(f"Loaded {len(records):,} records")
     
-    # Import records in batches of 1000
+    # Prepare batches for parallel processing
     batch_size = 1000
-    batch_delay = 10  # seconds
-    total_imported = 0
-    failed_imports = 0
+    batches = []
     
+    start_time = datetime.now()
+    current_time = start_time.strftime('%Y-%m-%d %H:%M:%S')
+    print(f"\n[{current_time}] Starting parallel batch import with {len(records) // batch_size + (1 if len(records) % batch_size else 0)} batches...")
+    print(f"Using ThreadPoolExecutor for parallel processing\n")
+    
+    # Create batch data structures
     for batch_num in range(0, len(records), batch_size):
-        batch_start_time = datetime.now()
         batch_records = records[batch_num:batch_num + batch_size]
         batch_num_display = (batch_num // batch_size) + 1
         
-        current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        print(f"\n[{current_time}] Processing batch {batch_num_display}: {len(batch_records)} records...")
+        batches.append({
+            'batch_num': batch_num,
+            'batch_num_display': batch_num_display,
+            'records': batch_records
+        })
+    
+    # Process batches in parallel using ThreadPoolExecutor
+    total_imported = 0
+    total_failed = 0
+    batch_results = []
+    
+    # Use ThreadPoolExecutor for I/O-bound operations
+    max_workers = min(5, len(batches))  # Use up to 5 parallel threads
+    
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_to_batch = {executor.submit(import_batch_parallel, batch): batch for batch in batches}
         
-        for idx, record in enumerate(batch_records):
+        for future in as_completed(future_to_batch):
             try:
-                # Import record to masterdata
-                result = VtexConnector.CONNECTOR.value.createDocument(
-                    entityNam, 
-                    schema, 
-                    record
-                )
-                
-                if result.get('httpStatus') == 200:
-                    total_imported += 1
-                    if (idx + 1) % 100 == 0:
-                        current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                        print(f"  [{current_time}] ✓ Imported {idx + 1}/{len(batch_records)} records in this batch")
-                else:
-                    failed_imports += 1
-                    current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                    print(f"  [{current_time}] ✗ Failed to import record {idx + 1}: {result.get('message', 'Unknown error')}")
+                batch_num_display, imported, failed, duration = future.result()
+                total_imported += imported
+                total_failed += failed
+                batch_results.append((batch_num_display, imported, failed, duration))
             except Exception as e:
-                failed_imports += 1
                 current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                print(f"  [{current_time}] ✗ Error importing record {idx + 1}: {str(e)}")
-        
-        # Calculate batch execution time
-        batch_end_time = datetime.now()
-        batch_duration_seconds = (batch_end_time - batch_start_time).total_seconds()
-        batch_duration_minutes = batch_duration_seconds / 60
-        current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        
-        print(f"[{current_time}] Batch {batch_num_display} completed: {len(batch_records)} records imported (Time taken: {batch_duration_minutes:.2f} minutes)")
-        
-        # Add delay between batches (except after the last batch)
-        if batch_num + batch_size < len(records):
-            current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            print(f"[{current_time}] Waiting {batch_delay}s before next batch...")
-            time.sleep(batch_delay)
+                print(f"[{current_time}] ✗ Error processing batch: {str(e)}")
+    
+    # Calculate overall statistics
+    end_time = datetime.now()
+    total_duration_seconds = (end_time - start_time).total_seconds()
+    total_duration_minutes = total_duration_seconds / 60
+    
+    # Print summary
+    current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    print(f"\n[{current_time}] ═══════════════════════════════════════════════════════════")
+    print(f"[{current_time}] Import Summary:")
+    print(f"[{current_time}] Total Records: {len(records):,}")
+    print(f"[{current_time}] Successfully Imported: {total_imported:,}")
+    print(f"[{current_time}] Failed Imports: {total_failed:,}")
+    print(f"[{current_time}] Total Time Taken: {total_duration_minutes:.2f} minutes")
+    print(f"[{current_time}] ═══════════════════════════════════════════════════════════\n")
+            # time.sleep(batch_delay)
     
     # Print summary
     current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
