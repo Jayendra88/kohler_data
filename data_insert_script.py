@@ -447,7 +447,7 @@ def import_records_to_maserdata():
     batch_results = []
     
     # Use ThreadPoolExecutor for I/O-bound operations
-    max_workers = min(5, len(batches))  # Use up to 5 parallel threads
+    max_workers = min(10, len(batches))  # Use up to 5 parallel threads
     
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         future_to_batch = {executor.submit(import_batch_parallel, batch): batch for batch in batches}
@@ -478,14 +478,14 @@ def import_records_to_maserdata():
     print(f"[{current_time}] ═══════════════════════════════════════════════════════════\n")
             # time.sleep(batch_delay)
     
-    # Print summary
-    current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    print(f"\n[{current_time}] {'='*50}")
-    print(f"Import Summary:")
-    print(f"  Total records imported: {total_imported:,}")
-    print(f"  Failed imports: {failed_imports:,}")
-    print(f"  Total records: {len(records):,}")
-    print(f"{'='*50}")
+    # # Print summary
+    # current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    # print(f"\n[{current_time}] {'='*50}")
+    # print(f"Import Summary:")
+    # print(f"  Total records imported: {total_imported:,}")
+    # print(f"  Failed imports: {failed_imports:,}")
+    # print(f"  Total records: {len(records):,}")
+    # print(f"{'='*50}")
 
 if __name__ == "__main__":
     # delete_existing_records()
