@@ -402,65 +402,79 @@ def import_batch_parallel(batch_data):
 
 def import_records_to_maserdata():
     """
-    Import records from sample_records_00001.json to masterdata.
-    Processes records in parallel batches of 1000 using ThreadPoolExecutor.
+    Import records from sample_records_003.json through sample_records_010.json to masterdata.
+    Loads one file at a time and processes records in parallel batches of 1000.
     """
     entityNam = "kohlerOrders"
     schema = "kohler-orders-schema-v1"
-    
-    # Read the sample records file
-    sample_file = "sample_data/sample_records_002.json"
-    
-    if not os.path.exists(sample_file):
-        print(f"Error: File {sample_file} not found!")
-        return
-    
-    print(f"Reading records from {sample_file}...")
-    with open(sample_file, 'r') as f:
-        records = json.load(f)
-    
-    print(f"Loaded {len(records):,} records")
-    
-    # Prepare batches for parallel processing
     batch_size = 1000
-    batches = []
+    
+    # List of sample files to process (skip first two files)
+    sample_files = [f"sample_data/sample_records_{i:03d}.json" for i in range(3, 11)]
     
     start_time = datetime.now()
+    overall_total_imported = 0
+    overall_total_failed = 0
+    
     current_time = start_time.strftime('%Y-%m-%d %H:%M:%S')
-    print(f"\n[{current_time}] Starting parallel batch import with {len(records) // batch_size + (1 if len(records) % batch_size else 0)} batches...")
-    print(f"Using ThreadPoolExecutor for parallel processing\n")
+    print(f"[{current_time}] Starting import from {len(sample_files)} files (loading one file at a time)...\n")
     
-    # Create batch data structures
-    for batch_num in range(0, len(records), batch_size):
-        batch_records = records[batch_num:batch_num + batch_size]
-        batch_num_display = (batch_num // batch_size) + 1
+    # Process each file one at a time
+    for file_idx, sample_file in enumerate(sample_files, 1):
+        if not os.path.exists(sample_file):
+            print(f"Warning: File {sample_file} not found, skipping...")
+            continue
         
-        batches.append({
-            'batch_num': batch_num,
-            'batch_num_display': batch_num_display,
-            'records': batch_records
-        })
-    
-    # Process batches in parallel using ThreadPoolExecutor
-    total_imported = 0
-    total_failed = 0
-    batch_results = []
-    
-    # Use ThreadPoolExecutor for I/O-bound operations
-    max_workers = min(10, len(batches))  # Use up to 5 parallel threads
-    
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        future_to_batch = {executor.submit(import_batch_parallel, batch): batch for batch in batches}
+        current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        print(f"[{current_time}] Loading file {file_idx}/{len(sample_files)}: {sample_file}...")
         
-        for future in as_completed(future_to_batch):
-            try:
-                batch_num_display, imported, failed, duration = future.result()
-                total_imported += imported
-                total_failed += failed
-                batch_results.append((batch_num_display, imported, failed, duration))
-            except Exception as e:
-                current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                print(f"[{current_time}] ✗ Error processing batch: {str(e)}")
+        try:
+            with open(sample_file, 'r') as f:
+                records = json.load(f)
+            
+            print(f"  Loaded {len(records):,} records from {sample_file}")
+            
+            # Prepare batches for parallel processing
+            batches = []
+            
+            # Create batch data structures
+            for batch_num in range(0, len(records), batch_size):
+                batch_records = records[batch_num:batch_num + batch_size]
+                batch_num_display = (batch_num // batch_size) + 1
+                
+                batches.append({
+                    'batch_num': batch_num,
+                    'batch_num_display': f"{file_idx}-{batch_num_display}",
+                    'records': batch_records
+                })
+            
+            # Process batches in parallel using ThreadPoolExecutor
+            total_imported = 0
+            total_failed = 0
+            
+            max_workers = min(10, len(batches))
+            
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                future_to_batch = {executor.submit(import_batch_parallel, batch): batch for batch in batches}
+                
+                for future in as_completed(future_to_batch):
+                    try:
+                        batch_num_display, imported, failed, duration = future.result()
+                        total_imported += imported
+                        total_failed += failed
+                    except Exception as e:
+                        current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                        print(f"[{current_time}] ✗ Error processing batch: {str(e)}")
+            
+            overall_total_imported += total_imported
+            overall_total_failed += total_failed
+            
+            current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            print(f"[{current_time}] File {file_idx} completed: {total_imported:,} imported, {total_failed:,} failed\n")
+            
+        except Exception as e:
+            current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            print(f"[{current_time}] ✗ Error reading file {sample_file}: {str(e)}\n")
     
     # Calculate overall statistics
     end_time = datetime.now()
@@ -470,10 +484,9 @@ def import_records_to_maserdata():
     # Print summary
     current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     print(f"\n[{current_time}] ═══════════════════════════════════════════════════════════")
-    print(f"[{current_time}] Import Summary:")
-    print(f"[{current_time}] Total Records: {len(records):,}")
-    print(f"[{current_time}] Successfully Imported: {total_imported:,}")
-    print(f"[{current_time}] Failed Imports: {total_failed:,}")
+    print(f"[{current_time}] Overall Import Summary:")
+    print(f"[{current_time}] Successfully Imported: {overall_total_imported:,}")
+    print(f"[{current_time}] Failed Imports: {overall_total_failed:,}")
     print(f"[{current_time}] Total Time Taken: {total_duration_minutes:.2f} minutes")
     print(f"[{current_time}] ═══════════════════════════════════════════════════════════\n")
             # time.sleep(batch_delay)
